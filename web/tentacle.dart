@@ -7,7 +7,7 @@ import 'package:noise/noise.dart';
 import 'shader.dart';
 
 class TentacleScene {
-  final int NBONES = 6;
+  final int NBONES = 10;
   int _width, _height;
   webgl.RenderingContext _gl;
   Shader _objShader;
@@ -43,23 +43,19 @@ uniform mat4 uProjection;
 uniform mat4 uModelView;
 uniform vec2 uBone[NBONES];
 
-varying vec4 color;
+varying vec4 vColor;
+varying vec3 vNormal;
 
 void main() {
   const float off = 1.0 / float(NBONES);
 
   mat4  boneMat = mat4(1.0);
+  mat4 foob = mat4(1.0);
   for (int i = NBONES-1; i >= 0; i--) {
     float influence = clamp(aBonePos - float(i-1), 0.0, 1.0);
-    float rx = uBone[i].x * influence;
-    float ry = uBone[i].y * influence;
+    float rx = uBone[i].x;// * influence;
+    float ry = uBone[i].y;// * influence;
 
-    // Translate the root of the bone to the origin
-    boneMat *= mat4(
-      1.0,0.0,0.0,0.0,
-      0.0,1.0,0.0,0.0,
-      0.0,0.0,1.0,0.0,
-      0.0,-off*float(i),0.0,1.0);
     // Rotate about X
     mat4 rotMat = mat4(
       1.0, 0.0, 0.0, 0.0,
@@ -72,20 +68,25 @@ void main() {
       sin(rx),  cos(rx), 0.0, 0.0,
       0.0, 0.0, 1.0, 0.0,
       0.0, 0.0, 0.0, 1.0);
+    rotMat *= influence;
+    rotMat += mat4(1.0) * (1.0-influence);
     boneMat *= rotMat;
+foob *= rotMat;
     // Translate back to the proper place
+    vec4 center = vec4(0.0, off*float(i), 0.0, 0.0);
+    vec4 shift  = center - rotMat * center;
     boneMat *= mat4(
       1.0,0.0,0.0,0.0,
       0.0,1.0,0.0,0.0,
       0.0,0.0,1.0,0.0,
-      0.0,off*float(i),0.0,1.0);
+      shift.x,shift.y,shift.z,1.0);
   }
 
   gl_Position = uProjection * uModelView * boneMat * vec4(aPosition, 1.0);
-  gl_PointSize = 3.0;
-
-  color = vec4(aNormal, 1.0);
-  //color = vec4(aTexture, 0.0, 1.0);
+  
+  vNormal = (foob * vec4(aNormal,0.0)).xyz;
+  vColor = vec4(vNormal * 0.5 + 0.5, 1.0);
+  //vColor = vec4(aTexture, 0.0, 1.0);
 }
     """;
     
@@ -93,10 +94,22 @@ void main() {
 precision mediump int;
 precision mediump float;
 
-varying vec4 color;
+varying vec4 vColor;
+varying vec3 vNormal;
 
 void main() {
-  gl_FragColor = color;//vec4(0.0, 1.0, 0.0, 1.0);
+  //gl_FragColor = vColor;//vec4(0.0, 1.0, 0.0, 1.0);
+
+  vec3 ambientColor = vec3(0.6, 1.0, 0.6);
+  vec3 diffuseColor = vec3(0.6, 0.6, 1.0);
+  vec3 diffuse2Color = vec3(1.0, 0.4, 0.4);
+  float ambient = 0.15;
+  float diffuse = max(dot(vNormal, vec3(0.0, 1.0, 0.0)), 0.0);
+  float diffuse2 = max(dot(vNormal, vec3(-1.0, 0.0, 0.0)), 0.0);
+  vec3 totalColor = (ambient * ambientColor) + 
+                    (diffuse * diffuseColor) +
+                    (diffuse2 * diffuse2Color); 
+  gl_FragColor = vec4(totalColor, 1.0);
 }
     """;
     
@@ -108,7 +121,7 @@ void main() {
     for (var tentacle in tentacles) {
       tentacle.animate(time);
     }
-    //tentacles[0]._segRot[2] = PI/2;
+    //tentacles[0]._segRot[2] = PI/4;
   }
   
   void render() {
@@ -182,8 +195,8 @@ class Tentacle {
   }
   
   void draw() {
-    //_gl.drawElements(webgl.TRIANGLES, _nIndices, webgl.UNSIGNED_SHORT, 0);
-    _gl.drawElements(webgl.LINE_STRIP, _nIndices, webgl.UNSIGNED_SHORT, 0);
+    _gl.drawElements(webgl.TRIANGLES, _nIndices, webgl.UNSIGNED_SHORT, 0);
+    //_gl.drawElements(webgl.LINE_STRIP, _nIndices, webgl.UNSIGNED_SHORT, 0);
   }
   
   void generateGeometry() {
