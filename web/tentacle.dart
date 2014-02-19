@@ -3,11 +3,12 @@ import 'dart:web_gl' as webgl;
 import 'dart:typed_data';
 import 'dart:math';
 import 'package:vector_math/vector_math.dart';
+import 'package:vector_math/vector_math_lists.dart';
 import 'package:noise/noise.dart';
 import 'shader.dart';
 
 class TentacleScene {
-  final int NBONES = 10;
+  final int NBONES = 20;
   int _width, _height;
   webgl.RenderingContext _gl;
   Shader _objShader;
@@ -49,8 +50,8 @@ varying vec3 vNormal;
 void main() {
   const float off = 1.0 / float(NBONES);
 
-  mat4  boneMat = mat4(1.0);
-  mat4 foob = mat4(1.0);
+  mat4  boneMat    = mat4(1.0);
+  mat4 totalRotMat = mat4(1.0);
   for (int i = NBONES-1; i >= 0; i--) {
     float influence = clamp(aBonePos - float(i-1), 0.0, 1.0);
     float rx = uBone[i].x;// * influence;
@@ -71,7 +72,7 @@ void main() {
     rotMat *= influence;
     rotMat += mat4(1.0) * (1.0-influence);
     boneMat *= rotMat;
-foob *= rotMat;
+    totalRotMat *= rotMat;
     // Translate back to the proper place
     vec4 center = vec4(0.0, off*float(i), 0.0, 0.0);
     vec4 shift  = center - rotMat * center;
@@ -84,7 +85,7 @@ foob *= rotMat;
 
   gl_Position = uProjection * uModelView * boneMat * vec4(aPosition, 1.0);
   
-  vNormal = (foob * vec4(aNormal,0.0)).xyz;
+  vNormal = (totalRotMat * vec4(aNormal,0.0)).xyz;
   vColor = vec4(vNormal * 0.5 + 0.5, 1.0);
   //vColor = vec4(aTexture, 0.0, 1.0);
 }
@@ -121,7 +122,7 @@ void main() {
     for (var tentacle in tentacles) {
       tentacle.animate(time);
     }
-    //tentacles[0]._segRot[2] = PI/4;
+    //tentacles[0]._segRot[2] = PI/2;
   }
   
   void render() {
@@ -165,14 +166,17 @@ class Tentacle {
   }
   
   void animate(double time) {
+    final speed = 1.6;
+    final damp  = 0.5;
+    
     for (var i = 1; i  < _nBones; i++) {
       var fx = simplex2(time / 10000, i / 10);
       var fy = simplex2(i / 10, time / 10000);
-      var rot = new Vector3(fx, 0.0, fy) * ((i+1) / _nBones) * 0.6;
+      var rot = new Vector3(fx, 0.0, fy) * ((i+1) / _nBones) * speed;
       _segRot[i*2+0] += rot.x;
       _segRot[i*2+1] += rot.z;
-      _segRot[i*2+0] *= 0.8;
-      _segRot[i*2+1] *= 0.8;
+      _segRot[i*2+0] *= damp;
+      _segRot[i*2+1] *= damp;
     }
   }
   
@@ -195,76 +199,71 @@ class Tentacle {
   }
   
   void draw() {
-    _gl.drawElements(webgl.TRIANGLES, _nIndices, webgl.UNSIGNED_SHORT, 0);
-    //_gl.drawElements(webgl.LINE_STRIP, _nIndices, webgl.UNSIGNED_SHORT, 0);
+    //_gl.drawElements(webgl.TRIANGLES, _nIndices, webgl.UNSIGNED_SHORT, 0);
+    _gl.drawElements(webgl.LINE_STRIP, _nIndices, webgl.UNSIGNED_SHORT, 0);
   }
   
   void generateGeometry() {
-    var vertPos = new List<double>();
-    var vertNrm = new List<double>();
-    var vertTex = new List<double>();
-    var vertBnP = new List<double>();
+    final nLoops = 50;
+    final nSides = 30;
+    final nVerts = nLoops * nSides + 1;
+    
+    var iv = 0;
+    var vertPos = new Vector3List(nVerts);
+    var vertNrm = new Vector3List(nVerts);
+    var vertTex = new Vector2List(nVerts);
+    var vertBnP = new Float32List(nVerts);
     var indices = new List<int>();
-    
-    // Generate skeleton
-    /*vertPos.addAll([0.0, 0.0, 0.0]);
-    vertBnP.add(0.0);
-    for (var i = 0; i < _nBones; i++) {
-      vertPos.addAll([0.0, (i+1)*(1.0/_nBones), 0.0]);
-      vertBnP.add(i.toDouble());
-      indices.addAll([i, i+1]);
-    }*/
-    
+
     // Generate body
-    final nLoops = 30;
-    final nSides = 16;
     final radsPerSide = 2.0*PI/nSides;
     for (var i = 0; i < nLoops; i++) {
-      final bonePos = i / (nLoops-1) * _nBones - 0.5;
+      final bonePos = i / (nLoops-1) * (_nBones-1);
       final radius = 0.1 * sqrt((nLoops-i)/nLoops);      
       for (var j = 0; j < nSides; j++) {
-        vertPos.addAll([radius*sin(j*radsPerSide),   i / (nLoops-1),
-                        radius*cos(j*radsPerSide)]);
-        vertBnP.add(bonePos.clamp(0.0, _nBones-1.0));
+        vertPos[iv] = new Vector3(
+            radius*sin(j*radsPerSide),   i / (nLoops-1),
+            radius*cos(j*radsPerSide));
+        vertBnP[iv] = bonePos.clamp(0.0, _nBones-1.0);
         final ny = 0.1/sqrt((nLoops-i)/nLoops);
         final nr = 1.0-ny*ny;
-        vertNrm.addAll([nr*sin(j*radsPerSide),    ny,
-                        nr*cos(j*radsPerSide)]);
-        vertTex.addAll([j / (nSides-1), i / (nLoops-1)]);
+        vertNrm[iv] = new Vector3(
+            nr*sin(j*radsPerSide),    ny,
+            nr*cos(j*radsPerSide));
+        vertTex[iv] = new Vector2(j / (nSides-1), i / (nLoops-1));
+        iv++;
         
         if (i != 0) {
-          final tl = vertPos.length ~/ 3 - 1;
-          final tr = (nSides-j > 1) ? (tl+1) : (tl+1-nSides);
+          final tl = iv - 1;
+          final tr = (nSides-j > 1) ? iv : (iv-nSides);
           final bl = tl - nSides, br = tr - nSides; 
           indices.addAll([bl, br, tl,    br, tr, tl]);
         }
       }
     }
     // Add geometry for a tip converging to a point
-    vertPos.addAll([0.0, 1.0 + 0.3/nLoops, 0.0]);
-    vertBnP.add(_nBones.toDouble());
-    vertNrm.addAll([0.0, 1.0, 0.0]);
-    vertTex.addAll([0.5, 1.0]);
-    final t = vertPos.length ~/ 3 - 1;
+    vertPos[iv] = new Vector3(0.0, 1.0 + 0.3/nLoops, 0.0);
+    vertBnP[iv] = _nBones.toDouble();
+    vertNrm[iv] = new Vector3(0.0, 1.0, 0.0);
+    vertTex[iv] = new Vector2(0.5, 1.0);
+    iv++;
+    
+    final t = iv - 1;
     for (var j = 0; j < nSides; j++) {
       final l = t - nSides + j;
       final r = (nSides-j > 1) ? (l+1) : (l+1-nSides);
       indices.addAll([l, r, t]);
     }
-    
+
     // Buffer geometry
     _gl.bindBuffer(webgl.ARRAY_BUFFER, _vboPos);
-    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, 
-        new Float32List.fromList(vertPos), webgl.STATIC_DRAW);
+    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, vertPos.buffer, webgl.STATIC_DRAW);
     _gl.bindBuffer(webgl.ARRAY_BUFFER, _vboNrm);
-    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, 
-        new Float32List.fromList(vertNrm), webgl.STATIC_DRAW);
+    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, vertNrm.buffer, webgl.STATIC_DRAW);
     _gl.bindBuffer(webgl.ARRAY_BUFFER, _vboTex);
-    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, 
-        new Float32List.fromList(vertTex), webgl.STATIC_DRAW);
+    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, vertTex.buffer, webgl.STATIC_DRAW);
     _gl.bindBuffer(webgl.ARRAY_BUFFER, _vboBnP);
-    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, 
-        new Float32List.fromList(vertBnP), webgl.STATIC_DRAW);
+    _gl.bufferDataTyped(webgl.ARRAY_BUFFER, vertBnP.buffer, webgl.STATIC_DRAW);
     _gl.bindBuffer(webgl.ELEMENT_ARRAY_BUFFER, _ibo);
     _gl.bufferDataTyped(webgl.ELEMENT_ARRAY_BUFFER, 
         new Uint16List.fromList(indices), webgl.STATIC_DRAW);
@@ -279,8 +278,6 @@ void main() {
   var canvas = document.querySelector("#glCanvas");
   scene = new TentacleScene(canvas);
   
-  window.onClick.listen((event) => scene.render());
-
   window.animationFrame
     ..then((time) => animate(time));
 }
