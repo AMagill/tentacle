@@ -2,8 +2,5 @@ name: tentacle
 description: A sample web application
 dependencies:
   browser: any
-  noise:
-    git:
-      ref: master
-      url: https://github.com/AMagill/noise.git
-  vector_math: any
+  vector_math:
+    git: https://github.com/johnmccutchan/vector_math
